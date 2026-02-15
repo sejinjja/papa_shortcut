@@ -55,11 +55,11 @@ button:hover {
 
 .widget-root {
   min-height: 100vh;
-  padding: 8px;
+  padding: 0;
 }
 
 .widget-shell {
-  min-height: calc(100vh - 16px);
+  min-height: 100vh;
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid rgba(198, 220, 255, 0.26);

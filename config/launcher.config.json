@@ -8,15 +8,16 @@
       "width": 460,
       "height": 760,
       "anchor": "bottom-right",
-      "offsetX": 4,
-      "offsetY": 4,
+      "offsetX": -6,
+      "offsetY": 0,
       "alwaysOnTop": true,
       "skipTaskbar": false,
-      "resizable": false,
+      "resizable": true,
       "frame": false,
       "hideOnBlur": false,
+      "hideTrigger": "outside-click",
       "blurBehavior": "windows-docking",
-      "edgeVisiblePx": 8,
+      "edgeVisiblePx": 4,
       "toggleShortcut": "Control+Shift+Space"
     },
     "theme": "blue"
@@ -44,7 +45,7 @@
       "id": "notepad",
       "name": "메모장",
       "categoryId": "tool",
-      "target": "notepad.exe",
+      "target": "C:/Windows/System32/notepad.exe",
       "icon": "assets/icons/notepad.svg",
       "keywords": [
         "메모",
@@ -55,7 +56,7 @@
       "id": "calc",
       "name": "계산기",
       "categoryId": "tool",
-      "target": "calc.exe",
+      "target": "C:/Windows/System32/calc.exe",
       "icon": "assets/icons/calculator.svg",
       "keywords": [
         "수학",
@@ -66,7 +67,7 @@
       "id": "explorer",
       "name": "문서",
       "categoryId": "tool",
-      "target": "C:/Users/USER/Documents",
+      "target": "C:/Users/mongTang/Documents",
       "icon": "assets/icons/folder.svg",
       "keywords": [
         "폴더",
@@ -80,7 +81,7 @@
       "target": "https://www.naver.com",
       "icon": "assets/icons/web.svg",
       "keywords": [
-        "웹",
+        "검색",
         "포털"
       ]
     },

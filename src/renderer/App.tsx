@@ -329,6 +329,20 @@ export default function App(): JSX.Element {
     });
   }
 
+  function getFocusedLauncherItem(): LauncherItem | null {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) {
+      return null;
+    }
+
+    const focusedItemId = activeElement.dataset.launcherItemId;
+    if (!focusedItemId) {
+      return null;
+    }
+
+    return filteredItems.find((item) => item.id === focusedItemId) ?? null;
+  }
+
   useEffect(() => {
     void loadConfig();
   }, []);
@@ -367,6 +381,11 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      // Keep Enter launch working even when IME composition state is reported.
+      if (event.isComposing && event.key !== "Enter") {
+        return;
+      }
+
       if (errorModal && event.key === "Escape") {
         setErrorModal(null);
         event.preventDefault();
@@ -414,14 +433,16 @@ export default function App(): JSX.Element {
         return;
       }
 
-      if (event.key === "Enter" && selectedItem) {
+      const focusedItem = getFocusedLauncherItem();
+      const itemToRun = focusedItem ?? selectedItem;
+      if (event.key === "Enter" && itemToRun) {
         event.preventDefault();
-        void runItem(selectedItem);
+        void runItem(itemToRun);
       }
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [
     config,
     loading,
@@ -517,6 +538,7 @@ export default function App(): JSX.Element {
                 type="button"
                 className={`item-row ${selected ? "is-selected" : ""} ${launching ? "is-launching" : ""}`}
                 aria-selected={selected}
+                data-launcher-item-id={item.id}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onFocus={() => setSelectedIndex(index)}
                 onClick={() => {

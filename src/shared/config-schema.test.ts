@@ -16,8 +16,9 @@ describe("launcherConfigSchema", () => {
           offsetX: 24,
           offsetY: 24,
           alwaysOnTop: true,
+          hideTrigger: "outside-click",
           blurBehavior: "windows-docking",
-          edgeVisiblePx: 8,
+          edgeVisiblePx: 30,
         },
       },
       categories: [
@@ -82,5 +83,24 @@ describe("launcherConfigSchema", () => {
     if (!result.success) {
       expect(result.error.issues[0]?.message).toContain("Duplicate category id");
     }
+  });
+
+  it("rejects unknown hide trigger", () => {
+    const invalid = {
+      version: 2,
+      app: {
+        title: "Papa Launcher",
+        fullscreen: false,
+        mode: "widget",
+        widget: {
+          hideTrigger: "invalid-trigger",
+        },
+      },
+      categories: [{ id: "all", label: "all" }],
+      items: [],
+    };
+
+    const result = launcherConfigSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
   });
 });

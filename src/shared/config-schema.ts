@@ -22,10 +22,11 @@ const launcherAppSchema = z.object({
       resizable: z.boolean().optional(),
       frame: z.boolean().optional(),
       hideOnBlur: z.boolean().optional(),
+      hideTrigger: z.enum(["blur", "outside-click"]).optional(),
       blurBehavior: z
         .enum(["none", "hide", "dock-right-edge", "windows-docking"])
         .optional(),
-      edgeVisiblePx: z.number().int().min(2).max(24).optional(),
+      edgeVisiblePx: z.number().int().min(2).max(60).optional(),
       toggleShortcut: nonEmptyText.optional(),
     })
     .optional(),

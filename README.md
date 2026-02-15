@@ -89,15 +89,16 @@ assets/
       "width": 460,
       "height": 760,
       "anchor": "bottom-right",
-      "offsetX": 4,
-      "offsetY": 4,
+      "offsetX": 0,
+      "offsetY": 0,
       "alwaysOnTop": true,
       "skipTaskbar": false,
-      "resizable": false,
+      "resizable": true,
       "frame": false,
       "hideOnBlur": false,
+      "hideTrigger": "outside-click",
       "blurBehavior": "windows-docking",
-      "edgeVisiblePx": 8,
+      "edgeVisiblePx": 30,
       "toggleShortcut": "Control+Shift+Space"
     },
     "theme": "blue"
@@ -139,10 +140,13 @@ assets/
 
 위젯 모드 추가 동작:
 - `hideOnBlur: true`일 때만 포커스 이탈 시 위젯 숨김
+- `hideTrigger: "outside-click"`이 기본값이며, 위젯 외부 클릭에서만 숨김/도킹 트리거
+- `hideTrigger: "blur"`를 지정하면 기존 포커스 이탈(blur) 기반 트리거로 동작
 - `blurBehavior: "windows-docking"`일 때 포커스 이탈 시 우측 가장자리로 도킹(얇은 영역 노출)
 - `blurBehavior: "dock-right-edge"`도 하위 호환으로 동일 동작
 - `edgeVisiblePx`로 도킹 시 노출 두께(px) 조절
 - `toggleShortcut`으로 위젯 표시/숨김 토글
+- `resizable: true`일 때 위젯은 세로(상하)만 크기 조절 가능(가로 폭은 고정)
 
 ## 7. 항목 편집기
 

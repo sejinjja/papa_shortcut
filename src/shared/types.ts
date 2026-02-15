@@ -51,6 +51,7 @@ export interface LauncherWidgetConfig {
   resizable?: boolean;
   frame?: boolean;
   hideOnBlur?: boolean;
+  hideTrigger?: "blur" | "outside-click";
   blurBehavior?: "none" | "hide" | "dock-right-edge" | "windows-docking";
   edgeVisiblePx?: number;
   toggleShortcut?: string;

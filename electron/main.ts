@@ -1,9 +1,13 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, shell } from "electron";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { launcherConfigSchema } from "../src/shared/config-schema";
+import {
+  createWindowsOutsideClickWatcher,
+  type WindowsOutsideClickWatcher,
+} from "./windows-outside-click";
 import type {
   ApiResult,
   ErrResult,
@@ -16,20 +20,35 @@ import type {
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const EXECUTABLE_EXTENSIONS = new Set([".exe", ".bat", ".cmd", ".com"]);
-const CSS_PX_PER_MM = 96 / 25.4;
+const SMOKE_LAUNCH_ARG_PREFIX = "--smoke-launch-item=";
+const SMOKE_ENTER_ARG_PREFIX = "--smoke-enter-item=";
 
 let mainWindow: BrowserWindow | null = null;
 let cachedConfigRaw: LauncherConfig | null = null;
 let cachedConfigForRenderer: LauncherConfig | null = null;
 let widgetModeEnabled = false;
-let widgetHideOnBlur = false;
-let widgetDockOnBlur = false;
+let widgetHideOnTrigger = false;
+let widgetDockOnTrigger = false;
+let widgetHideTrigger: "blur" | "outside-click" = "outside-click";
 let widgetDocked = false;
 let widgetEdgeVisiblePx = 6;
 let widgetHomeBounds: { width: number; height: number; x: number; y: number } | null = null;
 let widgetCursorWatchInterval: NodeJS.Timeout | null = null;
 let widgetFocusWatchInterval: NodeJS.Timeout | null = null;
+let widgetOutsideClickWatcher: WindowsOutsideClickWatcher | null = null;
 let widgetToggleShortcut: string | null = null;
+let smokeEnterExpectedItemId: string | null = null;
+let smokeEnterLaunchMatched = false;
+
+function getCliOptionValue(prefix: string): string | null {
+  const option = process.argv.find((value) => value.startsWith(prefix));
+  if (!option) {
+    return null;
+  }
+
+  const parsedValue = option.slice(prefix.length).trim();
+  return parsedValue.length > 0 ? parsedValue : null;
+}
 
 function getProjectRoot(): string {
   return path.resolve(__dirname, "..", "..");
@@ -150,6 +169,8 @@ function loadConfigFromPath(configPath: string): ApiResult<LauncherConfig> {
   let rawJson = "";
   try {
     rawJson = fs.readFileSync(configPath, "utf8");
+    // PowerShell/other editors may save UTF-8 BOM; JSON.parse cannot consume it.
+    rawJson = rawJson.replace(/^\uFEFF/, "");
   } catch (error) {
     return configError(
       "CONFIG_READ_FAILED",
@@ -341,6 +362,48 @@ function normalizeArgs(args: LauncherItem["args"]): string[] {
   return [];
 }
 
+function isBareCommandTarget(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+
+  if (value.includes("\\") || value.includes("/")) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveWindowsCommandPath(command: string): string | null {
+  if (process.platform !== "win32" || !isBareCommandTarget(command)) {
+    return null;
+  }
+
+  const result = spawnSync("where.exe", [command], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (result.status !== 0 || !result.stdout) {
+    return null;
+  }
+
+  const candidates = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && fs.existsSync(line));
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const nonWindowsAppsCandidate = candidates.find(
+    (candidate) => !candidate.toLowerCase().includes("\\windowsapps\\"),
+  );
+
+  return nonWindowsAppsCandidate ?? candidates[0];
+}
+
 function launchError(
   code: ErrResult["error"]["code"],
   message: string,
@@ -377,12 +440,15 @@ async function spawnProcess(
   cwd: string,
   itemName: string,
 ): Promise<LaunchResult> {
-  try {
+  const isBareCommand =
+    !executable.includes("\\") && !executable.includes("/") && executable.length > 0;
+
+  const spawnDetachedProcess = async (useShell: boolean): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(executable, args, {
         cwd,
         detached: true,
-        shell: false,
+        shell: useShell,
         stdio: "ignore",
         windowsHide: true,
       });
@@ -393,8 +459,29 @@ async function spawnProcess(
         resolve();
       });
     });
+  };
+
+  try {
+    await spawnDetachedProcess(false);
   } catch (error) {
     const launchFailure = error as NodeJS.ErrnoException;
+    if (launchFailure.code === "ENOENT" && isBareCommand) {
+      appendLog(
+        `Primary spawn failed with ENOENT for '${itemName}', retrying with shell=true target=${executable}`,
+      );
+      try {
+        await spawnDetachedProcess(true);
+      } catch (fallbackError) {
+        return launchError(
+          "TARGET_LAUNCH_FAILED",
+          `Failed to launch '${itemName}'.`,
+          formatUnknownError(fallbackError),
+        );
+      }
+
+      return { ok: true, message: `Launched: ${itemName}` };
+    }
+
     if (launchFailure.code === "EACCES" || launchFailure.code === "EPERM") {
       return launchError(
         "TARGET_PERMISSION_DENIED",
@@ -411,6 +498,48 @@ async function spawnProcess(
   }
 
   return { ok: true, message: `Launched: ${itemName}` };
+}
+
+function isWindowsProcessImageRunning(imageName: string): boolean {
+  if (process.platform !== "win32") {
+    return true;
+  }
+
+  const result = spawnSync(
+    "tasklist",
+    ["/FI", `IMAGENAME eq ${imageName}`, "/FO", "CSV", "/NH"],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+
+  if (result.status !== 0 || !result.stdout) {
+    return false;
+  }
+
+  const output = result.stdout.trim().toLowerCase();
+  if (!output) {
+    return false;
+  }
+
+  return !output.includes("no tasks are running");
+}
+
+async function verifyProcessLaunch(imageName: string): Promise<boolean> {
+  if (process.platform !== "win32") {
+    return true;
+  }
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (isWindowsProcessImageRunning(imageName)) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  return false;
 }
 
 async function launchItem(item: LauncherItem): Promise<LaunchResult> {
@@ -431,7 +560,20 @@ async function launchItem(item: LauncherItem): Promise<LaunchResult> {
     return { ok: true, message: `Opened URL: ${item.name}` };
   }
 
-  const absoluteTarget = path.isAbsolute(target) ? target : null;
+  const resolvedCommandPath = resolveWindowsCommandPath(target);
+  const absoluteTarget = path.isAbsolute(target)
+    ? target
+    : resolvedCommandPath && path.isAbsolute(resolvedCommandPath)
+      ? resolvedCommandPath
+      : null;
+  let executableNoArgsAbsoluteTarget: string | null = null;
+
+  if (resolvedCommandPath) {
+    appendLog(
+      `Resolved command target item='${item.name}' original='${target}' resolved='${resolvedCommandPath}'`,
+    );
+  }
+
   if (absoluteTarget && !fs.existsSync(absoluteTarget)) {
     return launchError(
       "TARGET_NOT_FOUND",
@@ -445,12 +587,12 @@ async function launchItem(item: LauncherItem): Promise<LaunchResult> {
     if (stat.isDirectory()) {
       return openPathTarget(absoluteTarget, item.name);
     }
-    if (
-      stat.isFile() &&
-      !EXECUTABLE_EXTENSIONS.has(path.extname(absoluteTarget).toLowerCase()) &&
-      args.length === 0
-    ) {
-      return openPathTarget(absoluteTarget, item.name);
+    if (stat.isFile() && args.length === 0) {
+      const extension = path.extname(absoluteTarget).toLowerCase();
+      if (!EXECUTABLE_EXTENSIONS.has(extension)) {
+        return openPathTarget(absoluteTarget, item.name);
+      }
+      executableNoArgsAbsoluteTarget = absoluteTarget;
     }
   }
 
@@ -470,7 +612,31 @@ async function launchItem(item: LauncherItem): Promise<LaunchResult> {
     );
   }
 
-  return spawnProcess(target, args, workingDir, item.name);
+  if (executableNoArgsAbsoluteTarget) {
+    const spawned = await spawnProcess(
+      executableNoArgsAbsoluteTarget,
+      [],
+      workingDir,
+      item.name,
+    );
+    if (!spawned.ok) {
+      return spawned;
+    }
+
+    const imageName = path.basename(executableNoArgsAbsoluteTarget);
+    const verified = await verifyProcessLaunch(imageName);
+    if (verified) {
+      return spawned;
+    }
+
+    appendLog(
+      `Process verification failed after spawn item='${item.name}' image='${imageName}', retrying with shell.openPath`,
+    );
+    return openPathTarget(executableNoArgsAbsoluteTarget, item.name);
+  }
+
+  const launchTarget = absoluteTarget ?? target;
+  return spawnProcess(launchTarget, args, workingDir, item.name);
 }
 
 function getCachedConfig(): ApiResult<LauncherConfig> {
@@ -494,9 +660,8 @@ function getWidgetBounds(config: LauncherConfig["app"]): {
   const widget = config.widget ?? {};
   const width = widget.width ?? 460;
   const height = widget.height ?? 760;
-  const oneMillimeterPx = Math.max(1, Math.round(CSS_PX_PER_MM));
-  const offsetX = widget.offsetX ?? oneMillimeterPx;
-  const offsetY = widget.offsetY ?? oneMillimeterPx;
+  const offsetX = widget.offsetX ?? 0;
+  const offsetY = widget.offsetY ?? 0;
   const anchor = widget.anchor ?? "bottom-right";
 
   const workArea = screen.getPrimaryDisplay().workArea;
@@ -536,6 +701,16 @@ function clearWidgetFocusWatch(): void {
   widgetFocusWatchInterval = null;
 }
 
+function clearWidgetOutsideClickWatch(): void {
+  if (!widgetOutsideClickWatcher) {
+    return;
+  }
+
+  widgetOutsideClickWatcher.stop();
+  widgetOutsideClickWatcher = null;
+  appendLog("Outside-click watcher stopped.");
+}
+
 function hasWidgetFocus(): boolean {
   if (!mainWindow) {
     return false;
@@ -555,8 +730,101 @@ function isPointInsideBounds(
   );
 }
 
+function getWidgetOutsideClickPollSettings(): {
+  intervalMs: number;
+  refreshRate: number;
+} {
+  const display = screen.getPrimaryDisplay();
+  const detectedRefreshRate =
+    typeof display.displayFrequency === "number" && display.displayFrequency > 0
+      ? display.displayFrequency
+      : 60;
+  const targetInterval = Math.round((1000 / detectedRefreshRate) * 3);
+  const intervalMs = Math.max(16, Math.min(60, targetInterval));
+  return {
+    intervalMs,
+    refreshRate: detectedRefreshRate,
+  };
+}
+
+function applyWidgetHideAction(trigger: "blur" | "outside-click"): void {
+  if (!mainWindow || !widgetModeEnabled || !mainWindow.isVisible()) {
+    return;
+  }
+
+  if (widgetHideOnTrigger) {
+    appendLog(`Widget hide action executed trigger=${trigger}`);
+    mainWindow.hide();
+    return;
+  }
+
+  if (widgetDockOnTrigger) {
+    appendLog(`Widget dock action requested trigger=${trigger}`);
+    dockWidgetWindow();
+    return;
+  }
+
+  appendLog(`Widget trigger ignored trigger=${trigger} reason=no-action`);
+}
+
+function startWidgetOutsideClickWatch(): void {
+  if (
+    !mainWindow ||
+    !widgetModeEnabled ||
+    widgetHideTrigger !== "outside-click" ||
+    (!widgetHideOnTrigger && !widgetDockOnTrigger) ||
+    widgetOutsideClickWatcher
+  ) {
+    return;
+  }
+
+  const { intervalMs, refreshRate } = getWidgetOutsideClickPollSettings();
+
+  try {
+    widgetOutsideClickWatcher = createWindowsOutsideClickWatcher({
+      intervalMs,
+      getCursorPoint: () => screen.getCursorScreenPoint(),
+      isPointInside: (point) => {
+        if (!mainWindow) {
+          return false;
+        }
+        return isPointInsideBounds(point, mainWindow.getBounds());
+      },
+      onMouseDownEdge: ({ button, point, inside }) => {
+        appendLog(
+          `Outside-click edge button=${button} x=${point.x} y=${point.y} inside=${inside}`,
+        );
+      },
+      onWatcherNotice: (message) => {
+        appendLog(`Outside-click watcher notice: ${message}`);
+      },
+      onOutsideClick: ({ button, point }) => {
+        appendLog(
+          `Outside-click trigger button=${button} x=${point.x} y=${point.y} docked=${widgetDocked}`,
+        );
+        if (widgetDocked) {
+          return;
+        }
+        applyWidgetHideAction("outside-click");
+      },
+    });
+  } catch (error) {
+    appendLog(`Outside-click watcher init failed: ${formatUnknownError(error)}`);
+    return;
+  }
+
+  widgetOutsideClickWatcher.start();
+  appendLog(
+    `Outside-click watcher started interval=${intervalMs}ms refreshRate=${refreshRate}Hz`,
+  );
+}
+
 function startWidgetFocusWatch(): void {
   if (!mainWindow || widgetFocusWatchInterval || !widgetModeEnabled) {
+    return;
+  }
+
+  if (widgetHideTrigger !== "blur" || !widgetDockOnTrigger) {
     return;
   }
 
@@ -565,7 +833,7 @@ function startWidgetFocusWatch(): void {
       return;
     }
 
-    if (!widgetDockOnBlur || widgetDocked) {
+    if (!widgetDockOnTrigger || widgetDocked || widgetHideTrigger !== "blur") {
       return;
     }
 
@@ -662,7 +930,7 @@ function startWidgetCursorWatch(): void {
 }
 
 function dockWidgetWindow(): void {
-  if (!mainWindow || !widgetModeEnabled || !widgetDockOnBlur || widgetDocked) {
+  if (!mainWindow || !widgetModeEnabled || !widgetDockOnTrigger || widgetDocked) {
     return;
   }
 
@@ -695,6 +963,8 @@ function createMainWindow(): void {
   const widgetBounds = getWidgetBounds(appConfig);
   const widget = appConfig.widget ?? {};
   const blurBehavior = widget.blurBehavior ?? (widget.hideOnBlur ? "hide" : "none");
+  const hideTrigger = widget.hideTrigger ?? "outside-click";
+  const widgetResizable = isWidgetMode ? (widget.resizable ?? false) : true;
   const dockOnBlurBehavior =
     blurBehavior === "dock-right-edge" || blurBehavior === "windows-docking";
 
@@ -702,12 +972,14 @@ function createMainWindow(): void {
   widgetDocked = false;
   clearWidgetCursorWatch();
   clearWidgetFocusWatch();
+  clearWidgetOutsideClickWatch();
   widgetHomeBounds = isWidgetMode ? { ...widgetBounds } : null;
   widgetEdgeVisiblePx = isWidgetMode
-    ? Math.max(2, Math.min(24, widget.edgeVisiblePx ?? 6))
-    : 6;
-  widgetHideOnBlur = isWidgetMode ? blurBehavior === "hide" : false;
-  widgetDockOnBlur = isWidgetMode ? dockOnBlurBehavior : false;
+    ? Math.max(2, Math.min(60, widget.edgeVisiblePx ?? 30))
+    : 30;
+  widgetHideOnTrigger = isWidgetMode ? blurBehavior === "hide" : false;
+  widgetDockOnTrigger = isWidgetMode ? dockOnBlurBehavior : false;
+  widgetHideTrigger = isWidgetMode ? hideTrigger : "outside-click";
   widgetToggleShortcut = isWidgetMode
     ? widget.toggleShortcut?.trim() || "Control+Shift+Space"
     : null;
@@ -720,7 +992,9 @@ function createMainWindow(): void {
     height: isWidgetMode ? widgetBounds.height : undefined,
     x: isWidgetMode ? widgetBounds.x : undefined,
     y: isWidgetMode ? widgetBounds.y : undefined,
-    resizable: isWidgetMode ? (widget.resizable ?? false) : true,
+    resizable: widgetResizable,
+    minWidth: isWidgetMode && widgetResizable ? widgetBounds.width : undefined,
+    maxWidth: isWidgetMode && widgetResizable ? widgetBounds.width : undefined,
     frame: isWidgetMode ? (widget.frame ?? true) : true,
     alwaysOnTop: isWidgetMode ? (widget.alwaysOnTop ?? true) : false,
     skipTaskbar: isWidgetMode ? (widget.skipTaskbar ?? false) : false,
@@ -744,6 +1018,30 @@ function createMainWindow(): void {
       mainWindow?.setPosition(widgetBounds.x, widgetBounds.y);
       widgetHomeBounds = { ...widgetBounds };
       startWidgetFocusWatch();
+      startWidgetOutsideClickWatch();
+    }
+
+    if (smokeEnterExpectedItemId) {
+      appendLog(`Smoke enter mode started expectedItemId=${smokeEnterExpectedItemId}`);
+      setTimeout(() => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          return;
+        }
+        mainWindow.focus();
+        mainWindow.webContents.focus();
+        mainWindow.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+        mainWindow.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+        appendLog("Smoke enter mode sent Enter key.");
+      }, 1800);
+
+      setTimeout(() => {
+        appendLog(
+          `Smoke enter mode finished expectedItemId=${smokeEnterExpectedItemId} matched=${String(
+            smokeEnterLaunchMatched,
+          )}`,
+        );
+        app.exit(smokeEnterLaunchMatched ? 0 : 21);
+      }, 4500);
     }
   });
 
@@ -753,14 +1051,11 @@ function createMainWindow(): void {
     }
     appendLog("Widget blur event received.");
 
-    if (widgetHideOnBlur) {
-      mainWindow?.hide();
+    if (widgetHideTrigger !== "blur") {
       return;
     }
 
-    if (widgetDockOnBlur) {
-      dockWidgetWindow();
-    }
+    applyWidgetHideAction("blur");
   });
 
   mainWindow.on("focus", () => {
@@ -774,6 +1069,7 @@ function createMainWindow(): void {
   mainWindow.on("closed", () => {
     clearWidgetCursorWatch();
     clearWidgetFocusWatch();
+    clearWidgetOutsideClickWatch();
     widgetDocked = false;
     mainWindow = null;
   });
@@ -867,8 +1163,17 @@ ipcMain.handle(
 ipcMain.handle(
   "launcher:launchItem",
   async (_event, itemId: string): Promise<LaunchResult> => {
+    appendLog(`Launch request received itemId=${itemId}`);
+    if (smokeEnterExpectedItemId && itemId === smokeEnterExpectedItemId) {
+      smokeEnterLaunchMatched = true;
+    }
     const configResult = getCachedConfig();
     if (!configResult.ok) {
+      appendLog(
+        `Launch request failed itemId=${itemId} reason=config-not-ready details=${
+          configResult.error.details ?? configResult.error.message
+        }`,
+      );
       return {
         ok: false,
         error: {
@@ -881,6 +1186,7 @@ ipcMain.handle(
 
     const item = configResult.data.items.find((entry) => entry.id === itemId);
     if (!item) {
+      appendLog(`Launch request failed itemId=${itemId} reason=item-not-found`);
       return launchError(
         "ITEM_NOT_FOUND",
         "Selected item does not exist.",
@@ -888,12 +1194,67 @@ ipcMain.handle(
       );
     }
 
-    return launchItem(item);
+    const result = await launchItem(item);
+    if (result.ok) {
+      appendLog(`Launch success itemId=${itemId} target=${item.target}`);
+    } else {
+      appendLog(
+        `Launch failure itemId=${itemId} code=${result.error.code} details=${
+          result.error.details ?? ""
+        }`,
+      );
+    }
+    return result;
   },
 );
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   appendLog("Application started.");
+  const smokeLaunchItemId = getCliOptionValue(SMOKE_LAUNCH_ARG_PREFIX);
+  if (smokeLaunchItemId) {
+    appendLog(`Smoke launch mode started itemId=${smokeLaunchItemId}`);
+    const configResult = getCachedConfig();
+    if (!configResult.ok) {
+      appendLog(
+        `Smoke launch failed itemId=${smokeLaunchItemId} reason=config-not-ready details=${
+          configResult.error.details ?? configResult.error.message
+        }`,
+      );
+      app.exit(11);
+      return;
+    }
+
+    const item = configResult.data.items.find((entry) => entry.id === smokeLaunchItemId);
+    if (!item) {
+      appendLog(`Smoke launch failed itemId=${smokeLaunchItemId} reason=item-not-found`);
+      app.exit(12);
+      return;
+    }
+
+    const launchResult = await launchItem(item);
+    if (launchResult.ok) {
+      appendLog(`Smoke launch success itemId=${smokeLaunchItemId} target=${item.target}`);
+      app.exit(0);
+    } else {
+      appendLog(
+        `Smoke launch failure itemId=${smokeLaunchItemId} code=${launchResult.error.code} details=${
+          launchResult.error.details ?? ""
+        }`,
+      );
+      app.exit(13);
+    }
+    return;
+  }
+
+  const smokeEnterItemId = getCliOptionValue(SMOKE_ENTER_ARG_PREFIX);
+  if (smokeEnterItemId) {
+    smokeEnterExpectedItemId = smokeEnterItemId;
+    smokeEnterLaunchMatched = false;
+  } else {
+    smokeEnterExpectedItemId = null;
+    smokeEnterLaunchMatched = false;
+  }
+
   createMainWindow();
   registerWidgetShortcut();
 
@@ -916,6 +1277,7 @@ app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   clearWidgetCursorWatch();
   clearWidgetFocusWatch();
+  clearWidgetOutsideClickWatch();
 });
 
 process.on("uncaughtException", (error) => {
