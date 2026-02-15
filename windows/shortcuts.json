@@ -1,0 +1,18 @@
+[
+  {
+    "name": "문서 폴더",
+    "target": "C:/Users/USER/Documents"
+  },
+  {
+    "name": "다운로드 폴더",
+    "target": "C:/Users/USER/Downloads"
+  },
+  {
+    "name": "메모장",
+    "target": "notepad.exe"
+  },
+  {
+    "name": "네이버",
+    "target": "https://www.naver.com"
+  }
+]
