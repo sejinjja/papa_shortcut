@@ -1,0 +1,99 @@
+{
+  "version": 2,
+  "app": {
+    "title": "Papa Launcher",
+    "fullscreen": false,
+    "mode": "widget",
+    "widget": {
+      "width": 460,
+      "height": 760,
+      "anchor": "bottom-right",
+      "offsetX": 4,
+      "offsetY": 4,
+      "alwaysOnTop": true,
+      "skipTaskbar": false,
+      "resizable": false,
+      "frame": false,
+      "hideOnBlur": false,
+      "blurBehavior": "windows-docking",
+      "edgeVisiblePx": 8,
+      "toggleShortcut": "Control+Shift+Space"
+    },
+    "theme": "blue"
+  },
+  "categories": [
+    {
+      "id": "all",
+      "label": "전체"
+    },
+    {
+      "id": "game",
+      "label": "게임"
+    },
+    {
+      "id": "tool",
+      "label": "도구"
+    },
+    {
+      "id": "web",
+      "label": "웹"
+    }
+  ],
+  "items": [
+    {
+      "id": "notepad",
+      "name": "메모장",
+      "categoryId": "tool",
+      "target": "notepad.exe",
+      "icon": "assets/icons/notepad.svg",
+      "keywords": [
+        "메모",
+        "텍스트"
+      ]
+    },
+    {
+      "id": "calc",
+      "name": "계산기",
+      "categoryId": "tool",
+      "target": "calc.exe",
+      "icon": "assets/icons/calculator.svg",
+      "keywords": [
+        "수학",
+        "숫자"
+      ]
+    },
+    {
+      "id": "explorer",
+      "name": "문서",
+      "categoryId": "tool",
+      "target": "C:/Users/USER/Documents",
+      "icon": "assets/icons/folder.svg",
+      "keywords": [
+        "폴더",
+        "파일"
+      ]
+    },
+    {
+      "id": "naver",
+      "name": "네이버",
+      "categoryId": "web",
+      "target": "https://www.naver.com",
+      "icon": "assets/icons/web.svg",
+      "keywords": [
+        "웹",
+        "포털"
+      ]
+    },
+    {
+      "id": "steam",
+      "name": "스팀",
+      "categoryId": "game",
+      "target": "C:/Program Files (x86)/Steam/Steam.exe",
+      "icon": "assets/icons/game.svg",
+      "keywords": [
+        "스팀",
+        "게임"
+      ]
+    }
+  ]
+}
