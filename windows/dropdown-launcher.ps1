@@ -69,13 +69,13 @@ $form.BackColor = [System.Drawing.Color]::FromArgb(245, 247, 250)
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Location = New-Object System.Drawing.Point(16, 14)
 $titleLabel.Size = New-Object System.Drawing.Size(520, 24)
-$titleLabel.Text = 'Quick Launch'
+$titleLabel.Text = '빠른 실행 런처'
 $titleLabel.Font = New-Object System.Drawing.Font('Malgun Gothic', 12, [System.Drawing.FontStyle]::Bold)
 
 $searchLabel = New-Object System.Windows.Forms.Label
 $searchLabel.Location = New-Object System.Drawing.Point(16, 48)
 $searchLabel.Size = New-Object System.Drawing.Size(80, 22)
-$searchLabel.Text = 'Search:'
+$searchLabel.Text = '검색:'
 $searchLabel.Font = New-Object System.Drawing.Font('Malgun Gothic', 9)
 
 $searchBox = New-Object System.Windows.Forms.TextBox
@@ -95,14 +95,14 @@ if ($listBox.Items.Count -gt 0) {
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Location = New-Object System.Drawing.Point(16, 325)
 $statusLabel.Size = New-Object System.Drawing.Size(520, 28)
-$statusLabel.Text = 'Run with Enter or double-click | Esc to close'
+$statusLabel.Text = 'Enter 또는 더블클릭으로 실행 | Esc로 종료'
 $statusLabel.Font = New-Object System.Drawing.Font('Malgun Gothic', 9)
 $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
 
 $launchButton = New-Object System.Windows.Forms.Button
 $launchButton.Location = New-Object System.Drawing.Point(366, 352)
 $launchButton.Size = New-Object System.Drawing.Size(82, 32)
-$launchButton.Text = 'Run'
+$launchButton.Text = '실행'
 $launchButton.Font = New-Object System.Drawing.Font('Malgun Gothic', 9)
 $launchButton.BackColor = [System.Drawing.Color]::FromArgb(50, 120, 255)
 $launchButton.ForeColor = [System.Drawing.Color]::White
@@ -111,7 +111,7 @@ $launchButton.FlatStyle = 'Flat'
 $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Location = New-Object System.Drawing.Point(454, 352)
 $closeButton.Size = New-Object System.Drawing.Size(82, 32)
-$closeButton.Text = 'Close'
+$closeButton.Text = '닫기'
 $closeButton.Font = New-Object System.Drawing.Font('Malgun Gothic', 9)
 
 $filteredShortcuts = @($shortcuts)
@@ -144,28 +144,28 @@ function Update-ShortcutList {
 
     if ($TargetList.Items.Count -gt 0) {
         $TargetList.SelectedIndex = 0
-        $Status.Text = "Results: $($TargetList.Items.Count)"
+        $Status.Text = "검색 결과: $($TargetList.Items.Count)개"
     }
     else {
-        $Status.Text = 'No results found.'
+        $Status.Text = '검색 결과가 없습니다.'
     }
 }
 
 $runSelectedShortcut = {
     if ($listBox.SelectedIndex -lt 0 -or $filteredShortcuts.Count -eq 0) {
-        $statusLabel.Text = 'Select an item first.'
+        $statusLabel.Text = '실행할 항목을 먼저 선택하세요.'
         return
     }
 
     $selectedName = $listBox.SelectedItem.ToString()
     $selected = $filteredShortcuts | Where-Object { $_.name -eq $selectedName } | Select-Object -First 1
     if ($null -eq $selected) {
-        $statusLabel.Text = 'Selected item not found. Try again.'
+        $statusLabel.Text = '선택 항목을 찾지 못했습니다. 다시 시도하세요.'
         return
     }
 
     Open-Target -Target $selected.target
-    $statusLabel.Text = "Launched: $($selected.name)"
+    $statusLabel.Text = "실행됨: $($selected.name)"
 }
 
 $searchBox.Add_TextChanged({
