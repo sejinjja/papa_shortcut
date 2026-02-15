@@ -9,7 +9,7 @@ Windows 11에서 **더블클릭 탐색기 방식 없이**, 시작 메뉴/북마�
 - 단독 사용자(아버님 계정) 기준으로 간단한 개인화
 
 ## 구성 파일
-- `windows/dropdown-launcher.ps1`: 드롭다운에서 항목 선택 즉시 실행되는 런처
+- `windows/dropdown-launcher.ps1`: 검색 + 목록 기반으로 즉시 실행되는 런처
 - `windows/shortcuts.json`: 실행 항목 목록(이름 + 대상 경로)
 
 ## 사용 방법 (Windows 11)
@@ -46,12 +46,44 @@ Windows 11에서 **더블클릭 탐색기 방식 없이**, 시작 메뉴/북마�
 ```
 
 - `target`은 파일, 폴더, 프로그램 경로, URL 모두 가능합니다.
-- 항목 선택 후 즉시 실행됩니다(1클릭).
+- 항목 선택 후 즉시 실행됩니다.
 
 ## UX 포인트
 - 창은 항상 위(TopMost)로 표시되어 빠르게 접근 가능
-- 드롭다운 한 번 클릭 → 항목 선택 즉시 실행
-- 실행 후 자동으로 기본 안내 항목으로 복귀
+- **검색창 + 목록 UI**로 항목이 많아도 쉽게 찾을 수 있음
+- `Enter` 또는 더블클릭으로 바로 실행
+- 하단 상태줄에서 실행/검색 결과를 즉시 확인
+- `Esc`로 빠른 종료
+
+
+## main 브랜치와 충돌(conflict) 났을 때
+`work` 브랜치에서 아래 순서로 해결하세요.
+
+```bash
+git fetch origin
+git checkout work
+git rebase origin/main
+```
+
+충돌 파일이 뜨면 파일을 수정한 뒤:
+
+```bash
+git add <충돌해결한_파일>
+git rebase --continue
+```
+
+모든 충돌 해결 후 원격 브랜치 갱신:
+
+```bash
+git push --force-with-lease origin work
+```
+
+rebase 대신 merge를 원하면:
+
+```bash
+git checkout work
+git merge origin/main
+```
 
 ## 문제 해결
 - 실행 정책 오류가 뜨면 바로가기 대상에 `-ExecutionPolicy Bypass`가 포함되어 있는지 확인하세요.
