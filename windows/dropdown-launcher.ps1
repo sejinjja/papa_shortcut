@@ -12,19 +12,19 @@ function Read-ShortcutConfig {
     param([string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        throw "Config 파일을 찾을 수 없습니다: $Path"
+        throw "Config file not found: $Path"
     }
 
     $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     $items = $raw | ConvertFrom-Json
 
     if ($null -eq $items -or $items.Count -eq 0) {
-        throw "Config 항목이 비어 있습니다. $Path 를 확인하세요."
+        throw "Config is empty. Check: $Path"
     }
 
     foreach ($item in $items) {
         if (-not $item.name -or -not $item.target) {
-            throw "모든 항목에 name/target 이 필요합니다."
+            throw "Each item requires both name and target."
         }
     }
 
@@ -39,13 +39,13 @@ function Open-Target {
         return
     }
 
-    # 프로그램 이름(notepad.exe) 같은 상대 명령도 허용하기 위해 존재 검사 실패해도 실행 시도
+    # Allow relative commands such as notepad.exe even when no literal path exists
     try {
         Start-Process -FilePath $Target | Out-Null
     }
     catch {
         [System.Windows.Forms.MessageBox]::Show(
-            "실행 실패: $Target`n$($_.Exception.Message)",
+            "Launch failed: $Target`n$($_.Exception.Message)",
             "Papa Shortcut",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error
